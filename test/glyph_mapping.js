@@ -362,13 +362,68 @@ describe('character to glyph mapping', function () {
       let strings = font.stringsForGlyph(68);
       assert.deepEqual(strings, ['a']);
     });
-
     it('should return strings from AAT morx table that map to the given glyph', function () {
       let font = fontkit.openSync(
         new URL('data/Play/Play-Regular.ttf', import.meta.url),
       );
       let strings = font.stringsForGlyph(767);
       assert.deepEqual(strings, ['ffi']);
+    });
+  });
+
+  describe('glyph id to code points (CJK)', function () {
+    const font = fontkit.openSync(
+      new URL('data/NotoSansCJK/NotoSansCJKkr-Regular.otf', import.meta.url),
+    );
+
+    function sweep(processor) {
+      let codePoints = [];
+      for (let gid = 1; gid <= 2000; gid++) {
+        codePoints.push(...processor.codePointsForGlyph(gid));
+      }
+
+      return codePoints;
+    }
+
+    it('should return every code point for glyph ids 1 through 2000', function () {
+      let codePoints = sweep(font._cmapProcessor);
+      assert.equal(codePoints.length, 2022);
+      assert.equal(
+        codePoints.reduce((sum, cp) => sum + cp, 0),
+        16205357,
+      );
+    });
+
+    it('should keep one-to-many glyph mappings', function () {
+      let codePoints = font._cmapProcessor.codePointsForGlyph(14);
+      assert.deepEqual(codePoints, [45, 8209]);
+    });
+
+    it('should return the same code points when the sweep is repeated', function () {
+      let processor = font._cmapProcessor;
+      let first = sweep(processor);
+      let second = sweep(processor);
+      assert.deepEqual(second, first);
+      assert.notStrictEqual(second, first);
+      assert.equal(first.length, 2022);
+    });
+
+    it('should map a glyph shared by two code points back to both', function () {
+      let processor = font._cmapProcessor;
+      assert.deepEqual(processor.codePointsForGlyph(9831), [12032, 19968]);
+
+      for (let codePoint of [12032, 19968]) {
+        let glyph = font.glyphForCodePoint(codePoint);
+        assert.equal(glyph.id, 9831);
+        assert.equal(glyph.advanceWidth, 1000);
+      }
+
+      let first = font.glyphForCodePoint(12032);
+      let second = font.glyphForCodePoint(19968);
+      assert.equal(first.path.toSVG(), second.path.toSVG());
+      assert.equal(first.advanceWidth, 1000);
+      assert.equal(second.advanceWidth, 1000);
+      assert.equal(first.advanceWidth + second.advanceWidth, 2000);
     });
   });
 });

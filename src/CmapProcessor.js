@@ -248,29 +248,41 @@ export default class CmapProcessor {
     }
   }
 
-  codePointsForGlyph(gid) {
+  // Inverts the cmap in one pass. Looking a glyph up in this index is O(1),
+  // unlike rescanning the whole cmap for every glyph id.
+  _buildReverseIndex() {
     let cmap = this.cmap;
+    let index = new Map();
+    let add = (gid, codepoint) => {
+      let codePoints = index.get(gid);
+      if (codePoints === undefined) {
+        codePoints = [];
+        index.set(gid, codePoints);
+      }
+
+      codePoints.push(codepoint);
+    };
+
     switch (cmap.version) {
       case 0: {
-        let res = [];
         for (let i = 0; i < 256; i++) {
-          if (cmap.codeMap.get(i) === gid) {
-            res.push(i);
+          let gid = cmap.codeMap.get(i);
+          if (gid !== undefined) {
+            add(gid, i);
           }
         }
 
-        return res;
+        break;
       }
 
       case 4: {
-        let res = [];
         for (let i = 0; i < cmap.segCount; i++) {
           let end = cmap.endCode.get(i);
           let start = cmap.startCode.get(i);
           let rangeOffset = cmap.idRangeOffset.get(i);
           let delta = cmap.idDelta.get(i);
 
-          for (var c = start; c <= end; c++) {
+          for (let c = start; c <= end; c++) {
             let g = 0;
             if (rangeOffset === 0) {
               g = c + delta;
@@ -282,55 +294,60 @@ export default class CmapProcessor {
               }
             }
 
-            if ((g & 0xffff) === gid) {
-              res.push(c);
-            }
+            add(g & 0xffff, c);
           }
         }
 
-        return res;
+        break;
       }
 
       case 6:
       case 10: {
-        let res = [];
         for (let i = 0; i < cmap.glyphIndices.length; i++) {
-          if (cmap.glyphIndices.get(i) === gid) {
-            res.push(cmap.firstCode + i);
+          let gid = cmap.glyphIndices.get(i);
+          if (gid !== undefined) {
+            add(gid, cmap.firstCode + i);
           }
         }
 
-        return res;
+        break;
       }
 
       case 12: {
-        let res = [];
         for (let group of cmap.groups.toArray()) {
-          if (
-            gid >= group.glyphID &&
-            gid <= group.glyphID + (group.endCharCode - group.startCharCode)
-          ) {
-            res.push(group.startCharCode + (gid - group.glyphID));
+          let code = group.startCharCode;
+          let gid = group.glyphID;
+          for (let end = group.endCharCode; code <= end; code++, gid++) {
+            add(gid, code);
           }
         }
 
-        return res;
+        break;
       }
 
       case 13: {
-        let res = [];
         for (let group of cmap.groups.toArray()) {
-          if (gid === group.glyphID) {
-            res.push(...range(group.startCharCode, group.endCharCode + 1));
+          for (let code of range(group.startCharCode, group.endCharCode + 1)) {
+            add(group.glyphID, code);
           }
         }
 
-        return res;
+        break;
       }
 
       default:
         throw new Error(`Unknown cmap format ${cmap.version}`);
     }
+
+    return index;
+  }
+
+  codePointsForGlyph(gid) {
+    if (!this._reverseIndex) {
+      this._reverseIndex = this._buildReverseIndex();
+    }
+
+    return this._reverseIndex.get(gid) || [];
   }
 }
 
